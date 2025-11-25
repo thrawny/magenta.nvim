@@ -4,6 +4,9 @@ require("magenta.actions")
 local M = {}
 local LspServer = require('magenta.lsp-server')
 
+-- Module-level state for prediction tracking
+local prediction_esc_mappings = {}
+
 M.setup = function(opts)
   Options.set_options(opts)
   M.start(true)
@@ -286,11 +289,8 @@ M.bridge = function(channelId)
     vim.rpcnotify(channelId, "magentaLspResponse", { requestId, response })
   end
 
-  -- Store original mappings for cleanup
-  local original_esc_mappings = {}
-
   M.setup_prediction_esc_mapping = function(bufnr)
-    original_esc_mappings[bufnr] = vim.fn.maparg("<Esc>", "n", false, true)
+    prediction_esc_mappings[bufnr] = vim.fn.maparg("<Esc>", "n", false, true)
     vim.keymap.set(
       "n",
       "<Esc>",
@@ -308,7 +308,7 @@ M.bridge = function(channelId)
   end
 
   M.cleanup_prediction_esc_mapping = function(bufnr)
-    local original = original_esc_mappings[bufnr]
+    local original = prediction_esc_mappings[bufnr]
     if original and original.lhs and original.rhs then
       local restore_opts = {
         silent = original.silent == 1,
@@ -322,7 +322,7 @@ M.bridge = function(channelId)
       vim.keymap.del("n", "<Esc>", { buffer = bufnr })
     end
 
-    original_esc_mappings[bufnr] = nil
+    prediction_esc_mappings[bufnr] = nil
   end
 
   -- Store autocmd IDs for cleanup
@@ -497,6 +497,11 @@ M.lsp_type_definition_request = function(requestId, bufnr, row, col)
       M.lsp_response(requestId, responses)
     end
   )
+end
+
+M.has_prediction = function()
+  local bufnr = vim.api.nvim_get_current_buf()
+  return prediction_esc_mappings[bufnr] ~= nil
 end
 
 return M
