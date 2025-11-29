@@ -22,10 +22,6 @@ import {
 import { calculateDiff } from "./diff.ts";
 import { MAGENTA_HIGHLIGHT_GROUPS } from "../nvim/extmarks.ts";
 import { PREDICTION_SYSTEM_PROMPT } from "../providers/system-prompt.ts";
-import {
-  selectBestPredictionLocation,
-  type MatchRange,
-} from "./cursor-utils.ts";
 
 // Default token budget for recent changes (approximately 3 characters per token)
 export const DEFAULT_RECENT_CHANGE_TOKEN_BUDGET = 1000;
@@ -434,8 +430,8 @@ export class EditPredictionController {
     const contextText = contextWindow.contextLines.join("\n");
     const findText = this.resolveFindText(prediction.find, contextText);
 
-    // Calculate the new text after replacement
-    const newText = contextText.replace(findText, prediction.replace);
+    // Calculate the new text after replacing all occurrences
+    const newText = contextText.split(findText).join(prediction.replace);
 
     // Calculate diff operations
     const diffOps = calculateDiff(contextText, newText);
@@ -573,50 +569,8 @@ export class EditPredictionController {
     const contextText = contextWindow.contextLines.join("\n");
     const findText = this.resolveFindText(prediction.find, contextText);
 
-    // Find all occurrences of the find text in context coordinates
-    const contextFindIndices: number[] = [];
-    let startIndex = 0;
-    let index: number;
-    while ((index = contextText.indexOf(findText, startIndex)) !== -1) {
-      contextFindIndices.push(index);
-      startIndex = index + 1;
-    }
-
-    // Cursor position in document coordinates
-    const cursorDocumentPos: Position0Indexed = {
-      row: (contextWindow.startLine + contextWindow.cursorDelta) as Row0Indexed,
-      col: contextWindow.cursorCol,
-    };
-
-    // Convert context indices to match ranges with document positions
-    const matchRanges: MatchRange[] = contextFindIndices.map((contextPos) => ({
-      contextPosStart: contextPos,
-      contextPosEnd: contextPos + findText.length,
-      startPos: this.convertCharPosToLineCol(
-        contextText,
-        contextPos,
-        contextWindow.startLine,
-        0 as ByteIdx,
-      ),
-      endPos: this.convertCharPosToLineCol(
-        contextText,
-        contextPos + findText.length,
-        contextWindow.startLine,
-        0 as ByteIdx,
-      ),
-    }));
-
-    // Select the best match using our priority logic
-    const bestMatchRange = selectBestPredictionLocation(
-      matchRanges,
-      cursorDocumentPos,
-    );
-
-    // Apply the replacement at the selected position
-    const replacedText =
-      contextText.substring(0, bestMatchRange.contextPosStart) +
-      prediction.replace +
-      contextText.substring(bestMatchRange.contextPosEnd);
+    // Replace all occurrences of findText with the replacement
+    const replacedText = contextText.split(findText).join(prediction.replace);
 
     const replacedLines = replacedText.split("\n");
 
@@ -627,18 +581,21 @@ export class EditPredictionController {
       lines: replacedLines as Line[],
     });
 
-    // Move cursor to the end of the replacement text
-    const newEndPos = this.convertCharPosToLineCol(
-      replacedText,
-      bestMatchRange.contextPosStart + prediction.replace.length,
-      contextWindow.startLine,
-      0 as ByteIdx,
-    );
+    // Find the first occurrence position to place cursor after replacement
+    const firstMatchPos = contextText.indexOf(findText);
+    if (firstMatchPos !== -1) {
+      const newEndPos = this.convertCharPosToLineCol(
+        replacedText,
+        firstMatchPos + prediction.replace.length,
+        contextWindow.startLine,
+        0 as ByteIdx,
+      );
 
-    await this.context.nvim.call("nvim_win_set_cursor", [
-      0, // 0 means current window
-      [newEndPos.row + 1, newEndPos.col], // Convert to 1-indexed row for nvim_win_set_cursor
-    ]);
+      await this.context.nvim.call("nvim_win_set_cursor", [
+        0, // 0 means current window
+        [newEndPos.row + 1, newEndPos.col], // Convert to 1-indexed row for nvim_win_set_cursor
+      ]);
+    }
   }
 
   async composeUserMessage(contextWindow?: CapturedContext): Promise<string> {

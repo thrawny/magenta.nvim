@@ -316,9 +316,11 @@ ${CODEBASE_CONVENTIONS}
 ${LEARNING_PROCESS}`;
 
 export const PREDICTION_SYSTEM_PROMPT = `\
-Predict the user's next edit based on their recent changes and current cursor position ( marked by │).
+Predict the user's next edit based on their recent changes and current cursor position (marked by │).
 
-Make sure to remove │ from the find and replace text.
+Remove │ from the find and replace text.
+
+The find/replace is applied to all matching occurrences in the context window. When the user has made a repetitive change (updating a date, renaming a variable, etc.), your find text should match all instances that need the same transformation.
 
 <example>
 context:
@@ -376,6 +378,24 @@ prediction:
   find: "const val: MyType"
   replace: "const val: NewType"
 }
+</example>
+
+<example>
+recent diffs:
+- const startDate = "2024-01-15";
++ const startDate = "2025-01-15";
+
+context:
+│const endDate = "2024-01-15";
+const deadline = "2024-01-15";
+const unrelatedDate = "2024-06-01";
+
+prediction:
+{
+  find: "2024-01-15"
+  replace: "2025-01-15"
+}
+Note: This replaces all three occurrences of "2024-01-15" but leaves "2024-06-01" unchanged.
 </example>
 
 `;

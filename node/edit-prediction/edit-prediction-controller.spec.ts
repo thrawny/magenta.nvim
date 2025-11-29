@@ -1070,3 +1070,74 @@ database: {
     expect(finalContent).not.toContain("cache: { enabled: true, ttl: 300 }");
   });
 });
+
+test("prediction replaces all matching occurrences", async () => {
+  await withDriver({}, async (driver) => {
+    const controller = driver.magenta.editPredictionController;
+
+    // Create a file with multiple identical strings that should all be replaced
+    const customContent = `\
+const config = {
+  startDate: "2024-01-15",
+  endDate: "2024-01-15",
+  deadline: "2024-01-15",
+  unrelatedDate: "2024-06-01",
+};`;
+
+    const customFilePath = path.join(driver.magenta.cwd, "dates-test.js");
+    await fs.writeFile(customFilePath, customContent);
+
+    await driver.command(`edit ${customFilePath}`);
+
+    const buffer = await getCurrentBuffer(driver.nvim);
+
+    // Trigger prediction
+    await driver.magenta.command("predict-edit");
+    await driver.awaitPredictionControllerState("awaiting-agent-reply");
+
+    // Mock a response that should replace all occurrences of the date
+    await driver.mockAnthropic.awaitPendingForceToolUseRequest();
+    await driver.mockAnthropic.respondToForceToolUse({
+      stopReason: "end_turn",
+      toolRequest: {
+        status: "ok",
+        value: {
+          id: "id" as ToolRequestId,
+          toolName: "predict_edit" as ToolName,
+          input: {
+            find: "2024-01-15",
+            replace: "2025-01-15",
+          },
+        },
+      },
+    });
+
+    await driver.awaitPredictionControllerState("displaying-proposed-edit");
+
+    // Accept the prediction
+    await driver.magenta.command("accept-prediction");
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(controller.state.type).toBe("idle");
+
+    // Verify ALL three occurrences were replaced
+    const newContent = (
+      await buffer.getLines({
+        start: 0 as Row0Indexed,
+        end: -1 as Row0Indexed,
+      })
+    ).join("\n");
+
+    // All three "2024-01-15" should now be "2025-01-15"
+    expect(newContent).toContain('startDate: "2025-01-15"');
+    expect(newContent).toContain('endDate: "2025-01-15"');
+    expect(newContent).toContain('deadline: "2025-01-15"');
+
+    // The unrelated date should remain unchanged
+    expect(newContent).toContain('unrelatedDate: "2024-06-01"');
+
+    // There should be no remaining "2024-01-15"
+    expect(newContent).not.toContain("2024-01-15");
+  });
+});
